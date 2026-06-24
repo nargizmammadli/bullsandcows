@@ -16,29 +16,58 @@
 
     <!-- HOME -->
     <section id="screen-home" class="screen">
-      <div class="card">
-        <h2>Create a room</h2>
-        <label for="digit-length">Secret length</label>
-        <select id="digit-length">
-          <option value="3">3 digits</option>
-          <option value="4" selected>4 digits</option>
-          <option value="5">5 digits</option>
-          <option value="6">6 digits</option>
-          <option value="7">7 digits</option>
-          <option value="8">8 digits</option>
-          <option value="9">9 digits</option>
-        </select>
-        <button id="btn-create" class="primary">Create Room</button>
+      <!-- Mode chooser -->
+      <div id="mode-select">
+        <button id="btn-mode-computer" class="primary mode-btn">🤖 Play vs Computer</button>
+        <button id="btn-mode-friend" class="primary mode-btn">👥 Play vs a Friend</button>
       </div>
 
-      <div class="divider">or</div>
+      <!-- vs Computer setup -->
+      <div id="mode-computer" class="hidden">
+        <div class="card">
+          <h2>Play vs Computer</h2>
+          <label for="cpu-digit-length">Secret length</label>
+          <select id="cpu-digit-length">
+            <option value="3">3 digits</option>
+            <option value="4" selected>4 digits</option>
+            <option value="5">5 digits</option>
+            <option value="6">6 digits</option>
+            <option value="7">7 digits</option>
+            <option value="8">8 digits</option>
+            <option value="9">9 digits</option>
+          </select>
+          <button id="btn-start-cpu" class="primary">Start Game</button>
+        </div>
+        <button class="ghost back-btn">← Back</button>
+      </div>
 
-      <div class="card">
-        <h2>Join a room</h2>
-        <label for="join-code">Room code</label>
-        <input id="join-code" type="text" maxlength="6" autocomplete="off"
-               placeholder="e.g. AB12" />
-        <button id="btn-join" class="primary">Join Room</button>
+      <!-- vs Friend setup (online) -->
+      <div id="mode-friend" class="hidden">
+        <div class="card">
+          <h2>Create a room</h2>
+          <label for="digit-length">Secret length</label>
+          <select id="digit-length">
+            <option value="3">3 digits</option>
+            <option value="4" selected>4 digits</option>
+            <option value="5">5 digits</option>
+            <option value="6">6 digits</option>
+            <option value="7">7 digits</option>
+            <option value="8">8 digits</option>
+            <option value="9">9 digits</option>
+          </select>
+          <button id="btn-create" class="primary">Create Room</button>
+        </div>
+
+        <div class="divider">or</div>
+
+        <div class="card">
+          <h2>Join a room</h2>
+          <label for="join-code">Room code</label>
+          <input id="join-code" type="text" maxlength="6" autocomplete="off"
+                 placeholder="e.g. AB12" />
+          <button id="btn-join" class="primary">Join Room</button>
+        </div>
+        <button class="ghost back-btn">← Back</button>
       </div>
     </section>
 

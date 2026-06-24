@@ -13,6 +13,12 @@
     myTurn: false,
     gameOver: false,
     mySecret: null,    // our own secret, kept locally to display to ourselves
+    mode: "friend",    // "friend" (online) or "computer" (local single-player)
+    opponentLabel: "Opponent",
+    // Computer-mode only:
+    cpuSecret: null,        // the secret the player must guess
+    cpuCandidates: [],      // remaining hypotheses for the player's secret
+    cpuGuessResults: [],    // [{guess, full, half}] the computer has received
   };
 
   // Whether our own secret is currently revealed (vs blurred).
@@ -67,6 +73,14 @@
     screens[name].classList.remove("hidden");
     // The "New Game" button is available everywhere except the home screen.
     $("btn-home").classList.toggle("hidden", name === "home");
+    if (name === "home") resetHomeView();
+  }
+
+  // Reset the home screen back to the mode chooser.
+  function resetHomeView() {
+    $("mode-select").classList.remove("hidden");
+    $("mode-computer").classList.add("hidden");
+    $("mode-friend").classList.add("hidden");
   }
 
   function showBanner(text, kind) {
@@ -120,6 +134,124 @@
     if (!/^[0-9]+$/.test(value)) return "Digits only.";
     if (new Set(value).size !== length) return "Digits must all be unique.";
     return null;
+  }
+
+  // ---- Computer opponent (local, no server) ----------------------------
+  // Same full/half scoring as the server, used purely client-side.
+  function computeScore(secret, guess) {
+    let full = 0;
+    let half = 0;
+    for (let i = 0; i < secret.length; i++) {
+      if (guess[i] === secret[i]) full++;
+      else if (secret.indexOf(guess[i]) !== -1) half++;
+    }
+    return { full, half };
+  }
+
+  // A random secret of unique digits.
+  function randomSecret(len) {
+    const digits = "0123456789".split("");
+    for (let i = digits.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [digits[i], digits[j]] = [digits[j], digits[i]];
+    }
+    return digits.slice(0, len).join("");
+  }
+
+  // Candidate hypotheses for the player's secret. Enumerate fully when the
+  // space is small; otherwise sample, to keep memory bounded for big lengths.
+  function buildCpuCandidates(len) {
+    let total = 1;
+    for (let i = 0; i < len; i++) total *= 10 - i;
+    if (total <= 200000) {
+      const out = [];
+      const digits = "0123456789".split("");
+      const used = new Array(10).fill(false);
+      const cur = [];
+      (function rec() {
+        if (cur.length === len) {
+          out.push(cur.join(""));
+          return;
+        }
+        for (let d = 0; d < 10; d++) {
+          if (!used[d]) {
+            used[d] = true;
+            cur.push(digits[d]);
+            rec();
+            cur.pop();
+            used[d] = false;
+          }
+        }
+      })();
+      return out;
+    }
+    const set = new Set();
+    while (set.size < 4000) set.add(randomSecret(len));
+    return [...set];
+  }
+
+  // Is candidate c consistent with every result the computer has seen?
+  function consistent(c, results) {
+    return results.every((r) => {
+      const sc = computeScore(c, r.guess);
+      return sc.full === r.full && sc.half === r.half;
+    });
+  }
+
+  // Pick the computer's next guess: narrow the pool to consistent hypotheses
+  // and play one of them (a valid candidate is itself a strong guess).
+  function cpuMakeGuess() {
+    let pool = state.cpuCandidates.filter((c) => consistent(c, state.cpuGuessResults));
+    if (pool.length === 0) {
+      // Pool exhausted (sampled mode) — resample some consistent candidates.
+      const seen = new Set();
+      pool = [];
+      for (let t = 0; t < 6000 && pool.length < 300; t++) {
+        const c = randomSecret(state.digitLength);
+        if (seen.has(c)) continue;
+        seen.add(c);
+        if (consistent(c, state.cpuGuessResults)) pool.push(c);
+      }
+    }
+    if (pool.length) state.cpuCandidates = pool;
+    return pool.length ? pool[Math.floor(Math.random() * pool.length)]
+                       : randomSecret(state.digitLength);
+  }
+
+  // Run the computer's turn after a short, human-feeling delay.
+  function scheduleCpuTurn() {
+    setTimeout(() => {
+      if (state.mode !== "computer" || state.gameOver) return;
+      if (screens.game.classList.contains("hidden")) return;
+      const guess = cpuMakeGuess();
+      const sc = computeScore(state.mySecret, guess);
+      state.cpuGuessResults.push({ guess, full: sc.full, half: sc.half });
+      addHistoryRow("B", guess, sc.full, sc.half);
+      if (sc.full === state.digitLength) {
+        endGame("B", guess);
+        return;
+      }
+      setTurn("A");
+    }, 700);
+  }
+
+  // Begin a fresh computer game: the computer rolls a secret for the player to
+  // crack, and prepares to guess the player's secret.
+  function startComputerGame(len) {
+    // Drop any leftover online-session state so it can't auto-rejoin later.
+    clearSession();
+    state.roomCode = null;
+    state.token = null;
+    state.mode = "computer";
+    state.role = "A";
+    state.opponentLabel = "Computer";
+    state.digitLength = len;
+    state.cpuSecret = randomSecret(len);
+    state.cpuCandidates = buildCpuCandidates(len);
+    state.cpuGuessResults = [];
+    state.mySecret = null;
+    state.gameOver = false;
+    goToSetSecret();
   }
 
   // ---- WebSocket + reconnection ----------------------------------------
@@ -364,7 +496,10 @@
       // too, and clearing would wipe what the player is mid-typing. The input
       // is cleared explicitly after a guess of ours is accepted instead.
     } else {
-      banner.textContent = "Opponent's turn — waiting…";
+      banner.textContent =
+        state.mode === "computer"
+          ? "Computer is thinking…"
+          : "Opponent's turn — waiting…";
       banner.className = "turn-banner their-turn";
       card.classList.add("disabled");
       $("btn-guess").disabled = true;
@@ -379,7 +514,7 @@
     headline.className = won ? "win" : "lose";
     $("over-detail").textContent = won
       ? `You cracked the secret: ${winningGuess}`
-      : `Your opponent guessed your secret: ${winningGuess}`;
+      : `${state.opponentLabel} guessed your secret: ${winningGuess}`;
     // Copy the live history into the game-over screen.
     $("history-over").innerHTML = $("history").innerHTML;
     $("btn-play-again").disabled = false;
@@ -528,7 +663,7 @@
 
     const who = document.createElement("span");
     who.className = "history-who" + (isYou ? " you" : "");
-    who.textContent = isYou ? "You" : "Opponent";
+    who.textContent = isYou ? "You" : state.opponentLabel;
     row.appendChild(who);
 
     // Plain digits — never colored. Coloring would leak which positions are
@@ -568,6 +703,11 @@
     // Remember our own secret locally so we can show it to ourselves later.
     state.mySecret = value;
     saveSession();
+    if (state.mode === "computer") {
+      // Local game — start immediately; player goes first.
+      startGame("A");
+      return;
+    }
     $("btn-set-secret").disabled = true;
     $("secret-status").classList.remove("hidden");
     sendWhenReady({ type: "set_secret", secret: value });
@@ -598,6 +738,19 @@
       return;
     }
     errEl.classList.add("hidden");
+    if (state.mode === "computer") {
+      // Score the player's guess against the computer's secret locally.
+      state.guessBoxes.clear();
+      const sc = computeScore(state.cpuSecret, value);
+      addHistoryRow("A", value, sc.full, sc.half);
+      if (sc.full === state.digitLength) {
+        endGame("A", value);
+        return;
+      }
+      setTurn("B");
+      scheduleCpuTurn();
+      return;
+    }
     sendWhenReady({ type: "make_guess", guess: value });
   }
 
@@ -620,6 +773,8 @@
 
   // ---- Wire up home + buttons -------------------------------------------
   $("btn-create").addEventListener("click", () => {
+    state.mode = "friend";
+    state.opponentLabel = "Opponent";
     state.digitLength = parseInt($("digit-length").value, 10);
     connect();
     sendWhenReady({ type: "create_room", digit_length: state.digitLength });
@@ -631,8 +786,28 @@
       showBanner("Enter a room code to join.", "error");
       return;
     }
+    state.mode = "friend";
+    state.opponentLabel = "Opponent";
     connect();
     sendWhenReady({ type: "join_room", room_code: code });
+  });
+
+  // Mode chooser
+  $("btn-mode-computer").addEventListener("click", () => {
+    $("mode-select").classList.add("hidden");
+    $("mode-computer").classList.remove("hidden");
+  });
+  $("btn-mode-friend").addEventListener("click", () => {
+    state.mode = "friend";
+    state.opponentLabel = "Opponent";
+    $("mode-select").classList.add("hidden");
+    $("mode-friend").classList.remove("hidden");
+  });
+  document
+    .querySelectorAll(".back-btn")
+    .forEach((b) => b.addEventListener("click", resetHomeView));
+  $("btn-start-cpu").addEventListener("click", () => {
+    startComputerGame(parseInt($("cpu-digit-length").value, 10));
   });
 
   $("join-code").addEventListener("keydown", (e) => {
@@ -661,9 +836,16 @@
   });
 
   $("btn-play-again").addEventListener("click", () => {
+    const dl = parseInt($("replay-length").value, 10) || state.digitLength;
+    if (state.mode === "computer") {
+      // Local replay — new computer secret, optionally a new length.
+      $("history").innerHTML = "";
+      $("history-over").innerHTML = "";
+      startComputerGame(dl);
+      return;
+    }
     $("btn-play-again").disabled = true;
     $("play-again-status").classList.remove("hidden");
-    const dl = parseInt($("replay-length").value, 10) || state.digitLength;
     sendWhenReady({ type: "play_again", digit_length: dl });
   });
 
