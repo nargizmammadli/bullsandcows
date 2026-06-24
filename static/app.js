@@ -122,6 +122,10 @@
         inputs.forEach((i) => (i.value = ""));
         if (inputs[0]) inputs[0].focus();
       },
+      fill: (value) => {
+        inputs.forEach((inp, idx) => (inp.value = value[idx] || ""));
+        if (inputs[inputs.length - 1]) inputs[inputs.length - 1].focus();
+      },
     };
   }
 
@@ -748,6 +752,10 @@
     );
   });
 
+  $("btn-suggest-secret").addEventListener("click", () => {
+    if (state.secretBoxes) state.secretBoxes.fill(randomSecret(state.digitLength));
+    $("secret-error").classList.add("hidden");
+  });
   $("btn-set-secret").addEventListener("click", submitSecret);
   $("btn-guess").addEventListener("click", submitGuess);
   $("btn-home").addEventListener("click", goHome);
