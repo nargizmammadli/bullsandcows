@@ -74,6 +74,7 @@
           <button id="btn-rotate" class="ghost" type="button">↻ Rotate: Horizontal</button>
           <button id="btn-reset-ships" class="ghost" type="button">⟲ Reset</button>
         </div>
+        <div id="place-legend" class="fleet-legend"></div>
         <div id="fleet-list" class="fleet-list"></div>
         <div class="board-wrap">
           <div id="place-board" class="board place-board"></div>
@@ -97,17 +98,27 @@
         <p id="play-again-status" class="status hidden">Waiting for opponent to accept…</p>
       </div>
 
+      <div id="game-legend" class="fleet-legend compact"></div>
+
       <div class="boards">
         <div class="board-col">
           <h3 class="board-label">🎯 Opponent's waters</h3>
           <div class="board-wrap">
             <div id="fire-board" class="board fire-board"></div>
           </div>
+          <div class="roster">
+            <div class="roster-title">Enemy fleet</div>
+            <div id="enemy-roster" class="roster-list"></div>
+          </div>
         </div>
         <div class="board-col">
           <h3 class="board-label">🛡️ Your fleet</h3>
           <div class="board-wrap">
             <div id="own-board" class="board own-board"></div>
+          </div>
+          <div class="roster">
+            <div class="roster-title">Your fleet</div>
+            <div id="own-roster" class="roster-list"></div>
           </div>
         </div>
       </div>

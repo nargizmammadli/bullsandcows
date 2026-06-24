@@ -451,7 +451,20 @@ a.primary:hover, a.card-play:hover { background: var(--accent-hover); }
 .fire-board .cell:not(.fired):hover { background: #20303f; outline: 1px solid var(--accent); }
 .fire-board .cell.fired { cursor: default; }
 
-/* Shot results */
+/* Ship type colours — `t<key>` sets the --tc variable read by cells/swatches */
+.tcarrier { --tc: #8b5cf6; }
+.tbattleship { --tc: #3b82f6; }
+.tcruiser { --tc: #14b8a6; }
+.tsubmarine { --tc: #f59e0b; }
+.tdestroyer { --tc: #ef4444; }
+
+/* Ship hulls (own board, placement, revealed) — coloured by type. */
+.cell.ship { background: var(--tc, var(--ship)); border-color: rgba(255, 255, 255, 0.35); }
+.cell.ship-current { outline: 2px solid #fff; outline-offset: -2px; }
+.cell.ship-revealed { opacity: 0.92; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45); }
+
+/* Shot results — declared AFTER the ship rules so a hit/miss is ALWAYS
+   visible, even when painted on top of one of your own coloured ship cells. */
 .cell.miss::after {
   content: "";
   position: absolute;
@@ -463,10 +476,19 @@ a.primary:hover, a.card-play:hover { background: var(--accent-hover); }
   background: var(--muted);
 }
 .cell.hit { background: var(--hit); border-color: var(--hit-deep); }
-.cell.sunk { background: var(--hit-deep); }
-.cell.ship { background: var(--ship); border-color: #6f7f99; }
-.cell.ship-current { background: var(--accent); border-color: var(--accent-hover); }
-.cell.ship-revealed { background: #3a4760; border-color: #55678a; }
+.cell.hit::after {
+  content: "✕";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(var(--cell) * 0.62);
+  font-weight: 800;
+  line-height: 1;
+  color: #fff;
+}
+.cell.sunk { background: var(--hit-deep); border-color: #1a0606; }
 
 /* Placement controls + fleet list */
 .place-controls { display: flex; gap: 10px; justify-content: center; margin: 6px 0 14px; }
@@ -492,18 +514,89 @@ a.primary:hover, a.card-play:hover { background: var(--accent-hover); }
   font-size: 0.85rem;
   border-radius: 8px;
 }
-.fleet-chip.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.fleet-chip.active { border-color: var(--tc, var(--accent)); box-shadow: 0 0 0 2px var(--tc, var(--accent)) inset; }
 .fleet-chip.placed { color: var(--muted); }
-.fleet-chip.placed .fleet-cell { background: var(--ship); }
 .fleet-name { font-weight: 700; }
 .fleet-cells { display: inline-flex; gap: 3px; }
 .fleet-cell {
   width: 12px;
   height: 12px;
   border-radius: 2px;
-  background: var(--gray);
-  border: 1px solid var(--border);
+  background: var(--tc, var(--gray));
+  border: 1px solid rgba(0, 0, 0, 0.3);
 }
+
+/* Fleet legend (ship counts / colour key) */
+.fleet-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  justify-content: center;
+  margin: 4px 0 14px;
+}
+.fleet-legend.compact { margin: 0 0 14px; font-size: 0.85rem; }
+.legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; }
+.legend-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--tc, var(--gray));
+  border: 1px solid rgba(0, 0, 0, 0.3);
+}
+.legend-label { color: var(--text); }
+.legend-count {
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1px 7px;
+}
+.legend-count.done { color: #7ee297; border-color: var(--green); }
+
+/* Per-side fleet rosters (which ships each side has + sunk status) */
+.roster { margin-top: 12px; width: 100%; max-width: 260px; }
+.roster-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  margin-bottom: 6px;
+  text-align: center;
+}
+.roster-list { display: flex; flex-direction: column; gap: 5px; }
+.roster-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 0.85rem;
+}
+.roster-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--tc, var(--gray));
+  border: 1px solid rgba(0, 0, 0, 0.3);
+  flex: 0 0 auto;
+}
+.roster-label { flex: 1 1 auto; }
+.roster-tag {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  color: #fff;
+  background: var(--hit);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.roster-chip.sunk { opacity: 0.6; border-color: var(--hit-deep); }
+.roster-chip.sunk .roster-label { text-decoration: line-through; color: var(--muted); }
+.roster-chip.sunk .roster-swatch { filter: grayscale(0.7); }
 
 /* Sunk announcements */
 .sunk-feed { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }

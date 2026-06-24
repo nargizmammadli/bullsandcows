@@ -5,6 +5,25 @@
   const $ = Twoplay.$;
   const GAME_TYPE = "battleship";
 
+  // Each ship TYPE gets its own colour + colour-square emoji (emojis render
+  // reliably everywhere and double as a colour key). `key` maps to a `t<key>`
+  // CSS class that sets the --tc colour variable used by cells/swatches.
+  const SHIP_STYLES = {
+    Carrier: { key: "carrier", emoji: "🟪", color: "#8b5cf6" },
+    Battleship: { key: "battleship", emoji: "🟦", color: "#3b82f6" },
+    Cruiser: { key: "cruiser", emoji: "🟩", color: "#14b8a6" },
+    Submarine: { key: "submarine", emoji: "🟨", color: "#f59e0b" },
+    Destroyer: { key: "destroyer", emoji: "🟥", color: "#ef4444" },
+  };
+  const DEFAULT_STYLE = { key: "unknown", emoji: "⬜", color: "#6b7280" };
+  const shipStyle = (name) => SHIP_STYLES[name] || DEFAULT_STYLE;
+  const nameById = (id) => {
+    const s = state.fleet.find((f) => f.id === id);
+    return s ? s.name : null;
+  };
+  // "Destroyer 2" -> "Destroyer"
+  const baseName = (label) => (label || "").replace(/\s+\d+$/, "");
+
   const state = {
     roomCode: null,
     role: null,
@@ -22,7 +41,8 @@
     gameOver: false,
     turn: null,
     myTurn: false,
-    shipCells: new Set(),   // my own ship cells, as "r,c"
+    shipCells: new Map(),   // my own ship cells: "r,c" -> ship name (for colour)
+    myShips: [],            // my fleet: [{id, label, name, cells}] (for sunk marking)
     myShots: [],            // shots I fired:   {row,col,result,sunk_ship}
     incomingShots: [],      // shots fired at me:{row,col,result,sunk_ship}
   };
@@ -119,6 +139,7 @@
     $("place-status").classList.add("hidden");
     $("btn-ready").disabled = true;
     buildBoard($("place-board"), state.gridSize, onPlaceCell);
+    renderFleetLegend($("place-legend"), true);
     renderFleetList();
     renderPlaceBoard();
     showScreen("place");
@@ -126,6 +147,44 @@
 
   function shipById(id) {
     return state.fleet.find((s) => s.id === id);
+  }
+
+  // Group the fleet by ship TYPE and render a colour-keyed legend. During
+  // placement (`showProgress`) it shows placed/total counts; in-game it shows
+  // the total of each type so the board colours have a key.
+  function renderFleetLegend(container, showProgress) {
+    if (!container) return;
+    const groups = [];
+    const byName = {};
+    state.fleet.forEach((s) => {
+      if (!byName[s.name]) {
+        byName[s.name] = { name: s.name, ids: [], length: s.length };
+        groups.push(byName[s.name]);
+      }
+      byName[s.name].ids.push(s.id);
+    });
+    container.innerHTML = "";
+    groups.forEach((g) => {
+      const st = shipStyle(g.name);
+      const item = document.createElement("div");
+      item.className = "legend-item";
+      const sw = document.createElement("span");
+      sw.className = "legend-swatch t" + st.key;
+      const label = document.createElement("span");
+      label.className = "legend-label";
+      if (showProgress) {
+        const placed = g.ids.filter((id) => state.placed[id]).length;
+        label.textContent = `${st.emoji} ${g.name} (${g.length})`;
+        const count = document.createElement("span");
+        count.className = "legend-count" + (placed === g.ids.length ? " done" : "");
+        count.textContent = `${placed}/${g.ids.length}`;
+        item.append(sw, label, count);
+      } else {
+        label.textContent = `${st.emoji} ${g.name} ×${g.ids.length}`;
+        item.append(sw, label);
+      }
+      container.appendChild(item);
+    });
   }
 
   function computeShipCells(ship, r, c) {
@@ -163,6 +222,7 @@
     // Advance to the next unplaced ship, if any.
     const next = state.fleet.find((s) => !state.placed[s.id]);
     if (next) state.currentShipId = next.id;
+    renderFleetLegend($("place-legend"), true);
     renderFleetList();
     renderPlaceBoard();
     $("btn-ready").disabled = Object.keys(state.placed).length !== state.fleet.length;
@@ -178,19 +238,20 @@
     const list = $("fleet-list");
     list.innerHTML = "";
     state.fleet.forEach((ship) => {
+      const st = shipStyle(ship.name);
       const chip = document.createElement("button");
       chip.type = "button";
-      chip.className = "fleet-chip";
+      chip.className = "fleet-chip t" + st.key;
       if (state.placed[ship.id]) chip.classList.add("placed");
       if (ship.id === state.currentShipId) chip.classList.add("active");
       const name = document.createElement("span");
       name.className = "fleet-name";
-      name.textContent = ship.label;
+      name.textContent = `${st.emoji} ${ship.label}`;
       const cells = document.createElement("span");
       cells.className = "fleet-cells";
       for (let i = 0; i < ship.length; i++) {
         const s = document.createElement("span");
-        s.className = "fleet-cell";
+        s.className = "fleet-cell t" + st.key;
         cells.appendChild(s);
       }
       chip.appendChild(name);
@@ -210,10 +271,11 @@
     board._cells.flat().forEach((cell) => (cell.className = "cell"));
     for (const [id, cells] of Object.entries(state.placed)) {
       const current = id === state.currentShipId;
+      const st = shipStyle(nameById(id));
       cells.forEach(([r, c]) => {
         const cell = getCell(board, r, c);
         if (cell) {
-          cell.classList.add("ship");
+          cell.classList.add("ship", "t" + st.key);
           if (current) cell.classList.add("ship-current");
         }
       });
@@ -232,8 +294,16 @@
   function submitPlacement() {
     if (Object.keys(state.placed).length !== state.fleet.length) return;
     const ships = state.fleet.map((s) => ({ id: s.id, cells: state.placed[s.id] }));
-    state.shipCells = new Set();
-    ships.forEach((s) => s.cells.forEach(([r, c]) => state.shipCells.add(r + "," + c)));
+    state.shipCells = new Map();
+    state.myShips = state.fleet.map((s) => ({
+      id: s.id,
+      label: s.label,
+      name: s.name,
+      cells: state.placed[s.id],
+    }));
+    state.fleet.forEach((s) =>
+      state.placed[s.id].forEach(([r, c]) => state.shipCells.set(r + "," + c, s.name))
+    );
     net.send({ type: "place_ships", ships });
     state.ready = true;
     $("btn-ready").disabled = true;
@@ -249,10 +319,12 @@
     $("sunk-feed").innerHTML = "";
     $("game-result").classList.add("hidden");
     $("play-again-status").classList.add("hidden");
+    renderFleetLegend($("game-legend"), false);
     buildBoard($("fire-board"), state.gridSize, onFireCell);
     buildBoard($("own-board"), state.gridSize, null);
     renderFireBoard();
     renderOwnBoard();
+    renderRosters();
     setTurn(firstTurn);
     showScreen("game");
   }
@@ -294,14 +366,67 @@
     const board = $("own-board");
     if (!board._cells) return;
     board._cells.flat().forEach((cell) => (cell.className = "cell"));
-    state.shipCells.forEach((key) => {
+    // Ship hulls, coloured by type.
+    state.shipCells.forEach((name, key) => {
       const [r, c] = key.split(",").map(Number);
       const cell = getCell(board, r, c);
-      if (cell) cell.classList.add("ship");
+      if (cell) cell.classList.add("ship", "t" + shipStyle(name).key);
     });
+    // Incoming shots: misses (dots) and hits (red) the defender CAN see.
+    const hitSet = new Set();
     state.incomingShots.forEach((s) => {
       const cell = getCell(board, s.row, s.col);
-      if (cell) cell.classList.add(s.result === "miss" ? "miss" : "hit");
+      if (s.result === "miss") {
+        if (cell) cell.classList.add("miss");
+      } else {
+        hitSet.add(s.row + "," + s.col);
+        if (cell) cell.classList.add("hit");
+      }
+    });
+    // A fully-hit ship of mine is sunk — mark its whole hull as sunk.
+    state.myShips.forEach((ship) => {
+      if (ship.cells.every(([r, c]) => hitSet.has(r + "," + c))) {
+        ship.cells.forEach(([r, c]) => {
+          const cell = getCell(board, r, c);
+          if (cell) cell.classList.add("sunk");
+        });
+      }
+    });
+  }
+
+  // Per-side fleet rosters: which ships each side has, and which are sunk.
+  function renderRosters() {
+    const mySunk = new Set(
+      state.incomingShots.filter((s) => s.result === "sunk").map((s) => s.sunk_ship)
+    );
+    const enemySunk = new Set(
+      state.myShots.filter((s) => s.result === "sunk").map((s) => s.sunk_ship)
+    );
+    renderRoster($("enemy-roster"), enemySunk);
+    renderRoster($("own-roster"), mySunk);
+  }
+
+  function renderRoster(container, sunkSet) {
+    if (!container) return;
+    container.innerHTML = "";
+    state.fleet.forEach((ship) => {
+      const st = shipStyle(ship.name);
+      const sunk = sunkSet.has(ship.label);
+      const chip = document.createElement("div");
+      chip.className = "roster-chip t" + st.key + (sunk ? " sunk" : "");
+      const sw = document.createElement("span");
+      sw.className = "roster-swatch t" + st.key;
+      const lab = document.createElement("span");
+      lab.className = "roster-label";
+      lab.textContent = `${st.emoji} ${ship.label}`;
+      chip.append(sw, lab);
+      if (sunk) {
+        const tag = document.createElement("span");
+        tag.className = "roster-tag";
+        tag.textContent = "SUNK";
+        chip.appendChild(tag);
+      }
+      container.appendChild(chip);
     });
   }
 
@@ -309,23 +434,27 @@
     const board = $("fire-board");
     if (!board._cells || !oppShips) return;
     oppShips.forEach((ship) => {
+      const st = shipStyle(nameById(ship.id) || baseName(ship.label));
       ship.cells.forEach(([r, c]) => {
         const cell = getCell(board, r, c);
-        if (cell && !cell.classList.contains("hit")) cell.classList.add("ship-revealed");
+        if (cell && !cell.classList.contains("hit") && !cell.classList.contains("sunk")) {
+          cell.classList.add("ship", "t" + st.key, "ship-revealed");
+        }
       });
     });
   }
 
   function announceSunk(shooter, label) {
     if (!label) return;
+    const emoji = shipStyle(baseName(label)).emoji;
     const div = document.createElement("div");
     div.className = "sunk-msg";
     if (shooter === state.role) {
       div.classList.add("good");
-      div.textContent = `💥 You sank the opponent's ${label}!`;
+      div.textContent = `💥 You sank the opponent's ${emoji} ${label}!`;
     } else {
       div.classList.add("bad");
-      div.textContent = `🔥 Your ${label} was sunk!`;
+      div.textContent = `🔥 Your ${emoji} ${label} was sunk!`;
     }
     const feed = $("sunk-feed");
     feed.insertBefore(div, feed.firstChild);
@@ -392,6 +521,7 @@
           state.incomingShots.push(shot);
           renderOwnBoard();
         }
+        renderRosters();
         announceSunk(msg.shooter, msg.sunk_ship);
         if (msg.next_turn) setTurn(msg.next_turn);
         break;
@@ -490,10 +620,12 @@
     Twoplay.hideBanner();
 
     // Rebuild my own ship cells from the server's record (if I'd placed).
-    state.shipCells = new Set();
-    (s.your_ships || []).forEach((ship) =>
-      ship.cells.forEach(([r, c]) => state.shipCells.add(r + "," + c))
-    );
+    state.shipCells = new Map();
+    state.myShips = (s.your_ships || []).map((ship) => {
+      const name = nameById(ship.id) || baseName(ship.label);
+      ship.cells.forEach(([r, c]) => state.shipCells.set(r + "," + c, name));
+      return { id: ship.id, label: ship.label, name, cells: ship.cells };
+    });
     state.myShots = s.your_shots || [];
     state.incomingShots = s.incoming_shots || [];
 
@@ -508,7 +640,10 @@
       // Placement phase.
       if (s.you_ready) {
         // Already locked in — show the waiting state with my placed fleet.
+        state.placed = {};
+        (s.your_ships || []).forEach((ship) => (state.placed[ship.id] = ship.cells));
         buildBoard($("place-board"), state.gridSize, null);
+        renderFleetLegend($("place-legend"), true);
         renderReadyPlaceBoard();
         $("btn-ready").disabled = true;
         $("place-status").classList.remove("hidden");
@@ -522,11 +657,14 @@
       return;
     }
 
+    renderFleetLegend($("game-legend"), false);
+
     if (s.over) {
       buildBoard($("fire-board"), state.gridSize, onFireCell);
       buildBoard($("own-board"), state.gridSize, null);
       renderFireBoard();
       renderOwnBoard();
+      renderRosters();
       const oppRole = state.role === "A" ? "B" : "A";
       if (s.boards) revealOpponentFleet(s.boards[oppRole]);
       endGame(s.winner, s.boards);
@@ -538,6 +676,7 @@
     buildBoard($("own-board"), state.gridSize, null);
     renderFireBoard();
     renderOwnBoard();
+    renderRosters();
     setTurn(s.turn);
     showScreen("game");
     if (!s.opponent_connected) {
@@ -549,10 +688,10 @@
   function renderReadyPlaceBoard() {
     const board = $("place-board");
     if (!board._cells) return;
-    state.shipCells.forEach((key) => {
+    state.shipCells.forEach((name, key) => {
       const [r, c] = key.split(",").map(Number);
       const cell = getCell(board, r, c);
-      if (cell) cell.classList.add("ship");
+      if (cell) cell.classList.add("ship", "t" + shipStyle(name).key);
     });
   }
 
@@ -576,7 +715,8 @@
     state.turn = null;
     state.ready = false;
     state.placed = {};
-    state.shipCells = new Set();
+    state.shipCells = new Map();
+    state.myShips = [];
     state.myShots = [];
     state.incomingShots = [];
     Twoplay.hideBanner();
