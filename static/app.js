@@ -15,10 +15,7 @@
     mySecret: null,    // our own secret, kept locally to display to ourselves
     mode: "friend",    // "friend" (online) or "computer" (local single-player)
     opponentLabel: "Opponent",
-    // Computer-mode only:
-    cpuSecret: null,        // the secret the player must guess
-    cpuCandidates: [],      // remaining hypotheses for the player's secret
-    cpuGuessResults: [],    // [{guess, full, half}] the computer has received
+    cpuSecret: null,   // computer-mode: the hidden secret the player must crack
   };
 
   // Whether our own secret is currently revealed (vs blurred).
@@ -158,85 +155,8 @@
     return digits.slice(0, len).join("");
   }
 
-  // Candidate hypotheses for the player's secret. Enumerate fully when the
-  // space is small; otherwise sample, to keep memory bounded for big lengths.
-  function buildCpuCandidates(len) {
-    let total = 1;
-    for (let i = 0; i < len; i++) total *= 10 - i;
-    if (total <= 200000) {
-      const out = [];
-      const digits = "0123456789".split("");
-      const used = new Array(10).fill(false);
-      const cur = [];
-      (function rec() {
-        if (cur.length === len) {
-          out.push(cur.join(""));
-          return;
-        }
-        for (let d = 0; d < 10; d++) {
-          if (!used[d]) {
-            used[d] = true;
-            cur.push(digits[d]);
-            rec();
-            cur.pop();
-            used[d] = false;
-          }
-        }
-      })();
-      return out;
-    }
-    const set = new Set();
-    while (set.size < 4000) set.add(randomSecret(len));
-    return [...set];
-  }
-
-  // Is candidate c consistent with every result the computer has seen?
-  function consistent(c, results) {
-    return results.every((r) => {
-      const sc = computeScore(c, r.guess);
-      return sc.full === r.full && sc.half === r.half;
-    });
-  }
-
-  // Pick the computer's next guess: narrow the pool to consistent hypotheses
-  // and play one of them (a valid candidate is itself a strong guess).
-  function cpuMakeGuess() {
-    let pool = state.cpuCandidates.filter((c) => consistent(c, state.cpuGuessResults));
-    if (pool.length === 0) {
-      // Pool exhausted (sampled mode) — resample some consistent candidates.
-      const seen = new Set();
-      pool = [];
-      for (let t = 0; t < 6000 && pool.length < 300; t++) {
-        const c = randomSecret(state.digitLength);
-        if (seen.has(c)) continue;
-        seen.add(c);
-        if (consistent(c, state.cpuGuessResults)) pool.push(c);
-      }
-    }
-    if (pool.length) state.cpuCandidates = pool;
-    return pool.length ? pool[Math.floor(Math.random() * pool.length)]
-                       : randomSecret(state.digitLength);
-  }
-
-  // Run the computer's turn after a short, human-feeling delay.
-  function scheduleCpuTurn() {
-    setTimeout(() => {
-      if (state.mode !== "computer" || state.gameOver) return;
-      if (screens.game.classList.contains("hidden")) return;
-      const guess = cpuMakeGuess();
-      const sc = computeScore(state.mySecret, guess);
-      state.cpuGuessResults.push({ guess, full: sc.full, half: sc.half });
-      addHistoryRow("B", guess, sc.full, sc.half);
-      if (sc.full === state.digitLength) {
-        endGame("B", guess);
-        return;
-      }
-      setTurn("A");
-    }, 700);
-  }
-
-  // Begin a fresh computer game: the computer rolls a secret for the player to
-  // crack, and prepares to guess the player's secret.
+  // Begin a fresh computer game: the computer hides a secret and the player
+  // tries to crack it. One-directional — the computer never guesses back.
   function startComputerGame(len) {
     // Drop any leftover online-session state so it can't auto-rejoin later.
     clearSession();
@@ -247,11 +167,17 @@
     state.opponentLabel = "Computer";
     state.digitLength = len;
     state.cpuSecret = randomSecret(len);
-    state.cpuCandidates = buildCpuCandidates(len);
-    state.cpuGuessResults = [];
-    state.mySecret = null;
+    state.mySecret = null; // the player sets no secret in this mode
     state.gameOver = false;
-    goToSetSecret();
+    // No secret-setting screen and no opponent turns — go straight to guessing.
+    $("history").innerHTML = "";
+    renderHistoryEmpty($("history"));
+    state.guessBoxes = buildDigitBoxes($("guess-boxes"), len, submitGuess);
+    $("my-secret-row").classList.add("hidden"); // no player secret to show
+    // Only one player guesses here, so the Mine/Both filter is meaningless.
+    document.querySelector("#screen-game .history-filter").classList.add("hidden");
+    setTurn("A");
+    showScreen("game");
   }
 
   // ---- WebSocket + reconnection ----------------------------------------
@@ -478,6 +404,7 @@
     );
     secretRevealed = false;
     renderMySecret();
+    document.querySelector("#screen-game .history-filter").classList.remove("hidden");
     setTurn(firstTurn);
     showScreen("game");
   }
@@ -488,7 +415,10 @@
     const banner = $("turn-banner");
     const card = $("guess-card");
     if (state.myTurn) {
-      banner.textContent = "Your turn — make a guess!";
+      banner.textContent =
+        state.mode === "computer"
+          ? "Crack the computer's secret!"
+          : "Your turn — make a guess!";
       banner.className = "turn-banner my-turn";
       card.classList.remove("disabled");
       $("btn-guess").disabled = false;
@@ -703,11 +633,6 @@
     // Remember our own secret locally so we can show it to ourselves later.
     state.mySecret = value;
     saveSession();
-    if (state.mode === "computer") {
-      // Local game — start immediately; player goes first.
-      startGame("A");
-      return;
-    }
     $("btn-set-secret").disabled = true;
     $("secret-status").classList.remove("hidden");
     sendWhenReady({ type: "set_secret", secret: value });
@@ -740,15 +665,11 @@
     errEl.classList.add("hidden");
     if (state.mode === "computer") {
       // Score the player's guess against the computer's secret locally.
+      // It stays the player's turn — the computer never guesses back.
       state.guessBoxes.clear();
       const sc = computeScore(state.cpuSecret, value);
       addHistoryRow("A", value, sc.full, sc.half);
-      if (sc.full === state.digitLength) {
-        endGame("A", value);
-        return;
-      }
-      setTurn("B");
-      scheduleCpuTurn();
+      if (sc.full === state.digitLength) endGame("A", value);
       return;
     }
     sendWhenReady({ type: "make_guess", guess: value });
