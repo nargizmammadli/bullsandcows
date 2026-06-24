@@ -192,6 +192,39 @@ button.ghost:hover { background: var(--border); }
 .guess-card.disabled { opacity: 0.5; pointer-events: none; }
 .guess-label { text-align: center; }
 
+/* Your-own-secret reveal row */
+.secret-reveal {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+.secret-reveal-value {
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: 4px;
+  color: var(--text);
+  transition: filter 0.12s;
+}
+.secret-reveal-value.blurred {
+  filter: blur(8px);
+  user-select: none;
+}
+.secret-reveal-toggle {
+  width: auto;
+  padding: 5px 12px;
+  font-size: 0.8rem;
+  background: var(--card-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.secret-reveal-toggle:hover { background: var(--border); }
+
 /* History */
 .history-header {
   display: flex;

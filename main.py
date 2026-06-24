@@ -323,12 +323,19 @@ async def handle_message(ws: WebSocket, conn: dict, data: dict) -> None:
         room, role = current_room(conn)
         if room is None or not room["over"]:
             return
+        # A player may optionally choose a new digit length for the next round.
+        dl = data.get("digit_length")
+        if isinstance(dl, int) and 3 <= dl <= 9:
+            room["pending_length"] = dl
         room["players"][role]["play_again"] = True
         both_ready = (
             len(room["players"]) == 2
             and all(p["play_again"] for p in room["players"].values())
         )
         if both_ready:
+            if room.get("pending_length"):
+                room["digit_length"] = room["pending_length"]
+            room["pending_length"] = None
             room["history"] = []
             room["started"] = False
             room["over"] = False
@@ -338,7 +345,23 @@ async def handle_message(ws: WebSocket, conn: dict, data: dict) -> None:
             for p in room["players"].values():
                 p["secret"] = None
                 p["play_again"] = False
-            await broadcast(room, {"type": "room_reset"})
+            await broadcast(
+                room,
+                {"type": "room_reset", "digit_length": room["digit_length"]},
+            )
+
+    elif msg_type == "leave_room":
+        # Player deliberately left via "New Game" — send the other player home
+        # too, then drop the room so neither can rejoin it.
+        room, role = current_room(conn)
+        if room is None:
+            return
+        opp = room["players"].get(opponent_role(role))
+        if opp and opp["ws"]:
+            await send(opp["ws"], {"type": "opponent_left"})
+        rooms.pop(room["code"], None)
+        conn["room_code"] = None
+        conn["role"] = None
 
     else:
         await send(ws, {"type": "error", "message": "Unknown message type"})

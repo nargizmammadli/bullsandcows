@@ -77,6 +77,12 @@
     <section id="screen-game" class="screen hidden">
       <div class="turn-banner" id="turn-banner">Your turn</div>
 
+      <div class="secret-reveal hidden" id="my-secret-row">
+        <span class="secret-reveal-label">Your secret:</span>
+        <span class="secret-reveal-value blurred" id="my-secret-value"></span>
+        <button id="btn-toggle-secret" class="secret-reveal-toggle" type="button">Show</button>
+      </div>
+
       <div class="card guess-card" id="guess-card">
         <label class="guess-label">Your guess</label>
         <div id="guess-boxes" class="digit-boxes"></div>
@@ -99,6 +105,16 @@
       <div class="card center">
         <h2 id="over-headline">Game Over</h2>
         <p id="over-detail" class="muted"></p>
+        <label for="replay-length">Digits for next round</label>
+        <select id="replay-length">
+          <option value="3">3 digits</option>
+          <option value="4">4 digits</option>
+          <option value="5">5 digits</option>
+          <option value="6">6 digits</option>
+          <option value="7">7 digits</option>
+          <option value="8">8 digits</option>
+          <option value="9">9 digits</option>
+        </select>
         <button id="btn-play-again" class="primary">Play Again</button>
         <p id="play-again-status" class="status hidden">
           Waiting for opponent to accept…

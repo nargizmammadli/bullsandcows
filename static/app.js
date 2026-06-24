@@ -12,7 +12,11 @@
     turn: null,        // "A" | "B" | null — last known whose-turn
     myTurn: false,
     gameOver: false,
+    mySecret: null,    // our own secret, kept locally to display to ourselves
   };
+
+  // Whether our own secret is currently revealed (vs blurred).
+  let secretRevealed = false;
 
   // History filter: "both" or "mine".
   let historyFilter = "both";
@@ -29,6 +33,7 @@
             role: state.role,
             token: state.token,
             digitLength: state.digitLength,
+            secret: state.mySecret,
           })
         );
       } catch {}
@@ -234,15 +239,20 @@
         goToSetSecret();
         break;
 
-      case "state_sync":
+      case "state_sync": {
         // Reconnected — rebuild the UI to match the server's truth.
         state.roomCode = msg.room_code;
         state.role = msg.role;
         state.digitLength = msg.digit_length;
+        // The server never echoes our secret; restore it from local storage so
+        // we can keep showing it to ourselves.
+        const sess = loadSession();
+        if (sess && sess.secret) state.mySecret = sess.secret;
         saveSession();
         hideBanner();
         rebuildFromState(msg);
         break;
+      }
 
       case "rejoin_failed":
         // Room is gone (server restarted, or abandoned too long).
@@ -268,6 +278,8 @@
 
       case "guess_result":
         addHistoryRow(msg.player, msg.guess, msg.full, msg.half);
+        // Clear the input only once OUR guess has been accepted.
+        if (msg.player === state.role && state.guessBoxes) state.guessBoxes.clear();
         setTurn(msg.next_turn);
         break;
 
@@ -283,12 +295,23 @@
         break;
 
       case "room_reset":
+        if (msg.digit_length) state.digitLength = msg.digit_length;
+        state.mySecret = null;
+        saveSession();
         resetForReplay();
         break;
 
       case "opponent_disconnected":
-        showBanner("Your opponent disconnected.", "warn");
-        $("guess-card").classList.add("disabled");
+        // Show a notice, but DO NOT disable your input — you can still make
+        // your move; it'll be waiting for them when they reconnect.
+        showBanner("Your opponent disconnected — they can rejoin anytime.", "warn");
+        break;
+
+      case "opponent_left":
+        // Opponent hit "New Game" — send us home automatically too.
+        clearSession();
+        resetToHome();
+        showBanner("Your opponent left the game.", "warn");
         break;
 
       case "error":
@@ -321,6 +344,8 @@
       state.digitLength,
       submitGuess
     );
+    secretRevealed = false;
+    renderMySecret();
     setTurn(firstTurn);
     showScreen("game");
   }
@@ -335,7 +360,9 @@
       banner.className = "turn-banner my-turn";
       card.classList.remove("disabled");
       $("btn-guess").disabled = false;
-      if (state.guessBoxes) state.guessBoxes.clear();
+      // NOTE: do not clear the guess input here — setTurn runs on reconnect
+      // too, and clearing would wipe what the player is mid-typing. The input
+      // is cleared explicitly after a guess of ours is accepted instead.
     } else {
       banner.textContent = "Opponent's turn — waiting…";
       banner.className = "turn-banner their-turn";
@@ -357,6 +384,8 @@
     $("history-over").innerHTML = $("history").innerHTML;
     $("btn-play-again").disabled = false;
     $("play-again-status").classList.add("hidden");
+    // Default the next-round length selector to the current length.
+    $("replay-length").value = String(state.digitLength);
     showScreen("over");
   }
 
@@ -368,13 +397,8 @@
     goToSetSecret();
   }
 
-  // Leave the current game and return Home to start fresh (e.g. a new room
-  // with a different digit count). The digit count is fixed per room, so a new
-  // game means a new room.
-  function goHome() {
-    const inProgress = !screens.game.classList.contains("hidden") && !state.gameOver;
-    if (inProgress && !confirm("Leave this game and start a new one?")) return;
-
+  // Tear down all game state and show the home screen.
+  function resetToHome() {
     clearSession();
     intentionalClose = true;
     clearTimeout(reconnectTimer);
@@ -389,8 +413,10 @@
     state.turn = null;
     state.myTurn = false;
     state.gameOver = false;
+    state.mySecret = null;
     state.secretBoxes = null;
     state.guessBoxes = null;
+    secretRevealed = false;
 
     hideBanner();
     $("history").innerHTML = "";
@@ -399,9 +425,22 @@
     showScreen("home");
   }
 
-  // Rebuild the whole UI from a server snapshot after a reconnect.
+  // Leave the current game via the "New Game" button. Tells the opponent so
+  // they're sent home too, then returns us home to start fresh.
+  function goHome() {
+    const inProgress = !screens.game.classList.contains("hidden") && !state.gameOver;
+    if (inProgress && !confirm("Leave this game and start a new one?")) return;
+    sendWhenReady({ type: "leave_room" });
+    resetToHome();
+  }
+
+  // Rebuild the UI from a server snapshot after a reconnect. Crucially this is
+  // non-destructive: if we're already on the correct screen we preserve any
+  // input the player is mid-typing rather than rebuilding the boxes.
   function rebuildFromState(s) {
     state.gameOver = s.over;
+    const onSecret = !screens.secret.classList.contains("hidden");
+    const onGame = !screens.game.classList.contains("hidden");
 
     // Lobby: room created but opponent never arrived.
     if (!s.started && !s.over && !s.opponent_present) {
@@ -413,10 +452,12 @@
 
     // Secret-setting phase.
     if (!s.started && !s.over) {
-      goToSetSecret();
+      // Only build the boxes if we're not already entering a secret — otherwise
+      // we'd wipe what the player is typing.
+      if (!onSecret || !state.secretBoxes) goToSetSecret();
       if (s.you_secret_set) {
-        // Already locked in (we don't keep the secret client-side) — just wait.
-        state.secretBoxes.clear();
+        // Already locked in (we don't keep the secret in the boxes) — just wait.
+        if (state.secretBoxes) state.secretBoxes.clear();
         $("btn-set-secret").disabled = true;
         $("secret-status").classList.remove("hidden");
       }
@@ -426,9 +467,13 @@
       return;
     }
 
-    // Game in progress (or finished): build board + history, then maybe over.
-    state.guessBoxes = buildDigitBoxes($("guess-boxes"), state.digitLength, submitGuess);
+    // Game in progress (or finished). Preserve the guess input if we're already
+    // on the board; only build boxes when arriving fresh (e.g. a page reload).
+    if (!onGame || !state.guessBoxes) {
+      state.guessBoxes = buildDigitBoxes($("guess-boxes"), state.digitLength, submitGuess);
+    }
     renderHistory(s.history);
+    renderMySecret();
 
     if (s.over) {
       endGame(s.winner, s.winning_guess);
@@ -436,8 +481,8 @@
       setTurn(s.turn);
       showScreen("game");
       if (!s.opponent_connected) {
-        showBanner("Your opponent disconnected.", "warn");
-        $("guess-card").classList.add("disabled");
+        // Notice only — never disable the input (you can still take your turn).
+        showBanner("Your opponent disconnected — they can rejoin anytime.", "warn");
       }
     }
   }
@@ -520,9 +565,26 @@
       return;
     }
     errEl.classList.add("hidden");
+    // Remember our own secret locally so we can show it to ourselves later.
+    state.mySecret = value;
+    saveSession();
     $("btn-set-secret").disabled = true;
     $("secret-status").classList.remove("hidden");
     sendWhenReady({ type: "set_secret", secret: value });
+  }
+
+  // Render our own secret on the game board, blurred unless revealed.
+  function renderMySecret() {
+    const row = $("my-secret-row");
+    const valEl = $("my-secret-value");
+    if (!state.mySecret) {
+      row.classList.add("hidden");
+      return;
+    }
+    row.classList.remove("hidden");
+    valEl.textContent = state.mySecret;
+    valEl.classList.toggle("blurred", !secretRevealed);
+    $("btn-toggle-secret").textContent = secretRevealed ? "Hide" : "Show";
   }
 
   function submitGuess() {
@@ -593,11 +655,16 @@
   $("btn-set-secret").addEventListener("click", submitSecret);
   $("btn-guess").addEventListener("click", submitGuess);
   $("btn-home").addEventListener("click", goHome);
+  $("btn-toggle-secret").addEventListener("click", () => {
+    secretRevealed = !secretRevealed;
+    renderMySecret();
+  });
 
   $("btn-play-again").addEventListener("click", () => {
     $("btn-play-again").disabled = true;
     $("play-again-status").classList.remove("hidden");
-    sendWhenReady({ type: "play_again" });
+    const dl = parseInt($("replay-length").value, 10) || state.digitLength;
+    sendWhenReady({ type: "play_again", digit_length: dl });
   });
 
   // History filter buttons (event delegation — works for both screens).
