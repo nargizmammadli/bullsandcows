@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: cows-and-bulls
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    # Render injects $PORT; bind to 0.0.0.0 so the service is reachable.
+    # uvicorn[standard] ships the websockets impl, so WS upgrades work.
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    autoDeploy: true
