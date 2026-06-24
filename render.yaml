@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: cows-and-bulls
+    name: twoplay
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt

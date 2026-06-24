@@ -3,167 +3,35 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Cows &amp; Bulls — Online Duel</title>
+  <title>Twoplay — 2-Player Game Arcade</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <div class="app">
-    <button id="btn-home" class="home-btn hidden" type="button">＋ New Game</button>
-    <h1 class="title">🐂 Cows &amp; Bulls</h1>
+  <header class="site-header">
+    <a class="brand" href="/">▶▶ Twoplay</a>
+  </header>
 
-    <!-- Connection status banner -->
-    <div id="banner" class="banner hidden"></div>
-
-    <!-- HOME -->
-    <section id="screen-home" class="screen">
-      <!-- Mode chooser -->
-      <div id="mode-select">
-        <button id="btn-mode-computer" class="primary mode-btn">🤖 Play vs Computer</button>
-        <button id="btn-mode-friend" class="primary mode-btn">👥 Play vs a Friend</button>
-      </div>
-
-      <!-- vs Computer setup -->
-      <div id="mode-computer" class="hidden">
-        <div class="card">
-          <h2>Play vs Computer</h2>
-          <label for="cpu-digit-length">Secret length</label>
-          <select id="cpu-digit-length">
-            <option value="3">3 digits</option>
-            <option value="4" selected>4 digits</option>
-            <option value="5">5 digits</option>
-            <option value="6">6 digits</option>
-            <option value="7">7 digits</option>
-            <option value="8">8 digits</option>
-            <option value="9">9 digits</option>
-          </select>
-          <button id="btn-start-cpu" class="primary">Start Game</button>
-        </div>
-        <button class="ghost back-btn">← Back</button>
-      </div>
-
-      <!-- vs Friend setup (online) -->
-      <div id="mode-friend" class="hidden">
-        <div class="card">
-          <h2>Create a room</h2>
-          <label for="digit-length">Secret length</label>
-          <select id="digit-length">
-            <option value="3">3 digits</option>
-            <option value="4" selected>4 digits</option>
-            <option value="5">5 digits</option>
-            <option value="6">6 digits</option>
-            <option value="7">7 digits</option>
-            <option value="8">8 digits</option>
-            <option value="9">9 digits</option>
-          </select>
-          <button id="btn-create" class="primary">Create Room</button>
-        </div>
-
-        <div class="divider">or</div>
-
-        <div class="card">
-          <h2>Join a room</h2>
-          <label for="join-code">Room code</label>
-          <input id="join-code" type="text" maxlength="6" autocomplete="off"
-                 placeholder="e.g. AB12" />
-          <button id="btn-join" class="primary">Join Room</button>
-        </div>
-        <button class="ghost back-btn">← Back</button>
-      </div>
+  <main class="app">
+    <section class="home-hero">
+      <h1 class="home-title">Pick a game</h1>
+      <p class="muted">Two players, one room code. Choose a game and invite a friend.</p>
     </section>
 
-    <!-- LOBBY / WAITING -->
-    <section id="screen-lobby" class="screen hidden">
-      <div class="card center">
-        <h2>Room ready</h2>
-        <p class="muted">Share this code with your friend:</p>
-        <div class="roomcode-row">
-          <span id="lobby-roomcode" class="roomcode">----</span>
-          <button id="btn-copy" class="ghost" title="Copy code">Copy</button>
-        </div>
-        <p id="lobby-status" class="status">Waiting for an opponent to join…</p>
-        <div class="spinner"></div>
-      </div>
-    </section>
+    <div class="game-grid">
+      <article class="game-card">
+        <div class="game-card-icon">🐂</div>
+        <h2>Cows &amp; Bulls</h2>
+        <p class="muted">Crack your opponent's secret number before they crack yours.</p>
+        <a class="primary card-play" href="/cows-and-bulls.html">Play</a>
+      </article>
 
-    <!-- SET SECRET -->
-    <section id="screen-secret" class="screen hidden">
-      <div class="card center">
-        <h2>Pick your secret</h2>
-        <p class="muted">
-          Enter <strong><span id="secret-length">4</span> unique digits</strong>.
-          Leading zeros are allowed. Your opponent will try to guess it.
-        </p>
-        <div id="secret-boxes" class="digit-boxes"></div>
-        <button id="btn-suggest-secret" class="ghost suggest-btn" type="button">🎲 Suggest a secret</button>
-        <p id="secret-error" class="error hidden"></p>
-        <button id="btn-set-secret" class="primary">Lock In Secret</button>
-        <p id="secret-status" class="status hidden">
-          Waiting for opponent to set their secret…
-        </p>
-      </div>
-    </section>
-
-    <!-- GAME BOARD -->
-    <section id="screen-game" class="screen hidden">
-      <div class="turn-banner" id="turn-banner">Your turn</div>
-
-      <div class="secret-reveal hidden" id="my-secret-row">
-        <span class="secret-reveal-label">Your secret:</span>
-        <span class="secret-reveal-value blurred" id="my-secret-value"></span>
-        <button id="btn-toggle-secret" class="secret-reveal-toggle" type="button">Show</button>
-      </div>
-
-      <div class="card guess-card" id="guess-card">
-        <label class="guess-label">Your guess</label>
-        <div id="guess-boxes" class="digit-boxes"></div>
-        <p id="guess-error" class="error hidden"></p>
-        <button id="btn-guess" class="primary">Submit Guess</button>
-      </div>
-
-      <button id="btn-give-up" class="ghost give-up-btn hidden" type="button">🏳️ Give up & show secret</button>
-
-      <div class="history-header">
-        <h3 class="history-title">History</h3>
-        <div class="history-filter" role="group" aria-label="Filter history">
-          <button type="button" data-filter="both">Both</button>
-          <button type="button" data-filter="mine">Mine</button>
-        </div>
-      </div>
-      <div id="history" class="history"></div>
-    </section>
-
-    <!-- GAME OVER -->
-    <section id="screen-over" class="screen hidden">
-      <div class="card center">
-        <h2 id="over-headline">Game Over</h2>
-        <p id="over-detail" class="muted"></p>
-        <p id="over-secret" class="reveal-secret hidden"></p>
-        <label for="replay-length">Digits for next round</label>
-        <select id="replay-length">
-          <option value="3">3 digits</option>
-          <option value="4">4 digits</option>
-          <option value="5">5 digits</option>
-          <option value="6">6 digits</option>
-          <option value="7">7 digits</option>
-          <option value="8">8 digits</option>
-          <option value="9">9 digits</option>
-        </select>
-        <button id="btn-play-again" class="primary">Play Again</button>
-        <p id="play-again-status" class="status hidden">
-          Waiting for opponent to accept…
-        </p>
-      </div>
-      <div class="history-header">
-        <h3 class="history-title">Final History</h3>
-        <div class="history-filter" role="group" aria-label="Filter history">
-          <button type="button" data-filter="both">Both</button>
-          <button type="button" data-filter="mine">Mine</button>
-        </div>
-      </div>
-      <div id="history-over" class="history"></div>
-    </section>
-  </div>
-
-  <script src="/app.js"></script>
+      <article class="game-card">
+        <div class="game-card-icon">🚢</div>
+        <h2>Battleship</h2>
+        <p class="muted">Hide your fleet, then sink your opponent's ship by ship.</p>
+        <a class="primary card-play" href="/battleship.html">Play</a>
+      </article>
+    </div>
+  </main>
 </body>
 </html>

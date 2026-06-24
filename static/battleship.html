@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Battleship — Twoplay</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/" id="brand-home">▶▶ Twoplay</a>
+    <button id="btn-newgame" class="ghost header-action hidden" type="button">＋ New Game</button>
+  </header>
+
+  <main class="app wide">
+    <h1 class="title">🚢 Battleship</h1>
+    <p class="subtitle muted">Hide your fleet, then sink your opponent's.</p>
+
+    <div id="banner" class="banner hidden"></div>
+
+    <!-- HOME (create/join) -->
+    <section id="screen-home" class="screen">
+      <div class="card">
+        <h2>Create a room</h2>
+        <label for="grid-size">Grid size</label>
+        <select id="grid-size">
+          <option value="8">8 × 8</option>
+          <option value="9">9 × 9</option>
+          <option value="10" selected>10 × 10 (classic)</option>
+          <option value="11">11 × 11</option>
+          <option value="12">12 × 12</option>
+          <option value="13">13 × 13</option>
+          <option value="14">14 × 14</option>
+          <option value="15">15 × 15</option>
+        </select>
+        <label for="turn-rule">Turn rule</label>
+        <select id="turn-rule">
+          <option value="strict" selected>Strict — always alternate</option>
+          <option value="hit_again">Hit again — a hit keeps your turn</option>
+        </select>
+        <button id="btn-create" class="primary">Create Room</button>
+      </div>
+
+      <div class="divider">or</div>
+
+      <div class="card">
+        <h2>Join a room</h2>
+        <label for="join-code">Room code</label>
+        <input id="join-code" type="text" maxlength="6" autocomplete="off" placeholder="e.g. AB12" />
+        <button id="btn-join" class="primary">Join Room</button>
+      </div>
+    </section>
+
+    <!-- LOBBY -->
+    <section id="screen-lobby" class="screen hidden">
+      <div class="card center">
+        <h2>Room ready</h2>
+        <p class="muted">Share this code with your friend:</p>
+        <div class="roomcode-row">
+          <span id="lobby-roomcode" class="roomcode">----</span>
+          <button id="btn-copy" class="ghost" title="Copy code">Copy</button>
+        </div>
+        <p id="lobby-status" class="status">Waiting for an opponent to join…</p>
+        <div class="spinner"></div>
+      </div>
+    </section>
+
+    <!-- PLACEMENT -->
+    <section id="screen-place" class="screen hidden">
+      <div class="card">
+        <h2>Place your fleet</h2>
+        <p class="muted" id="place-hint">Select a ship, choose its orientation, then click a cell to place it.</p>
+        <div class="place-controls">
+          <button id="btn-rotate" class="ghost" type="button">↻ Rotate: Horizontal</button>
+          <button id="btn-reset-ships" class="ghost" type="button">⟲ Reset</button>
+        </div>
+        <div id="fleet-list" class="fleet-list"></div>
+        <div class="board-wrap">
+          <div id="place-board" class="board place-board"></div>
+        </div>
+        <p id="place-error" class="error hidden"></p>
+        <button id="btn-ready" class="primary" disabled>Ready</button>
+        <p id="place-status" class="status hidden">Waiting for opponent to place their fleet…</p>
+      </div>
+    </section>
+
+    <!-- GAME (and game-over result, shown over the still-visible boards) -->
+    <section id="screen-game" class="screen hidden">
+      <div class="turn-banner" id="turn-banner">Your turn</div>
+      <div id="sunk-feed" class="sunk-feed"></div>
+
+      <!-- Result panel: revealed in place so the final boards stay on screen. -->
+      <div id="game-result" class="card center result-card hidden">
+        <h2 id="over-headline">Game Over</h2>
+        <p id="over-detail" class="muted"></p>
+        <button id="btn-play-again" class="primary">Play Again</button>
+        <p id="play-again-status" class="status hidden">Waiting for opponent to accept…</p>
+      </div>
+
+      <div class="boards">
+        <div class="board-col">
+          <h3 class="board-label">🎯 Opponent's waters</h3>
+          <div class="board-wrap">
+            <div id="fire-board" class="board fire-board"></div>
+          </div>
+        </div>
+        <div class="board-col">
+          <h3 class="board-label">🛡️ Your fleet</h3>
+          <div class="board-wrap">
+            <div id="own-board" class="board own-board"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/common.js"></script>
+  <script src="/battleship.js"></script>
+</body>
+</html>
