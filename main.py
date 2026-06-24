@@ -5,13 +5,19 @@ WebSocket endpoint implementing the game protocol. All state is in-memory.
 """
 
 import random
+import secrets
 import string
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
 app = FastAPI()
+
+# How long a room is kept alive after BOTH players have disconnected, so a
+# player who backgrounds their tab / loses Wi-Fi can rejoin where they left off.
+ABANDON_GRACE_SECONDS = 3600
 
 # ---------------------------------------------------------------------------
 # In-memory room state.
@@ -45,14 +51,45 @@ def generate_room_code() -> str:
 def new_room(digit_length: int) -> str:
     code = generate_room_code()
     rooms[code] = {
+        "code": code,
         "digit_length": digit_length,
         "players": {},
         "turn": None,
         "history": [],
         "started": False,
         "over": False,
+        "winner": None,
+        "winning_guess": None,
     }
     return code
+
+
+def new_player(ws: WebSocket) -> dict:
+    return {
+        "ws": ws,
+        "secret": None,
+        "play_again": False,
+        "token": secrets.token_urlsafe(9),
+        "connected": True,
+        "disconnected_at": None,
+    }
+
+
+def gc_rooms() -> None:
+    """Drop rooms whose players have all been gone past the grace period."""
+    now = time.time()
+    stale = []
+    for code, room in rooms.items():
+        players = list(room["players"].values())
+        if not players:
+            stale.append(code)
+            continue
+        if all(not p["connected"] for p in players):
+            last = max((p["disconnected_at"] or now) for p in players)
+            if now - last > ABANDON_GRACE_SECONDS:
+                stale.append(code)
+    for code in stale:
+        rooms.pop(code, None)
 
 
 def valid_number(value: str, length: int) -> bool:
@@ -94,11 +131,37 @@ async def send(ws: WebSocket, message: dict) -> None:
 
 async def broadcast(room: dict, message: dict) -> None:
     for player in room["players"].values():
-        await send(player["ws"], message)
+        if player["ws"] is not None:
+            await send(player["ws"], message)
 
 
 def opponent_role(role: str) -> str:
     return "B" if role == "A" else "A"
+
+
+def build_state_sync(room: dict, role: str) -> dict:
+    """A full snapshot so a reconnecting client can rebuild its UI.
+
+    Never includes any secret — only whether secrets are set.
+    """
+    me = room["players"][role]
+    opp = room["players"].get(opponent_role(role))
+    return {
+        "type": "state_sync",
+        "room_code": room["code"],
+        "role": role,
+        "digit_length": room["digit_length"],
+        "you_secret_set": me["secret"] is not None,
+        "opponent_present": opp is not None,
+        "opponent_secret_set": bool(opp and opp["secret"] is not None),
+        "opponent_connected": bool(opp and opp["connected"]),
+        "started": room["started"],
+        "over": room["over"],
+        "turn": room["turn"],
+        "history": room["history"],
+        "winner": room["winner"],
+        "winning_guess": room["winning_guess"],
+    }
 
 
 async def handle_message(ws: WebSocket, conn: dict, data: dict) -> None:
@@ -109,12 +172,22 @@ async def handle_message(ws: WebSocket, conn: dict, data: dict) -> None:
         if not isinstance(digit_length, int) or not (3 <= digit_length <= 9):
             await send(ws, {"type": "error", "message": "Digit length must be 3-9"})
             return
+        gc_rooms()
         code = new_room(digit_length)
         room = rooms[code]
-        room["players"]["A"] = {"ws": ws, "secret": None, "play_again": False}
+        player = new_player(ws)
+        room["players"]["A"] = player
         conn["room_code"] = code
         conn["role"] = "A"
-        await send(ws, {"type": "room_created", "room_code": code})
+        await send(
+            ws,
+            {
+                "type": "room_created",
+                "room_code": code,
+                "player_role": "A",
+                "token": player["token"],
+            },
+        )
         await send(ws, {"type": "waiting_for_opponent"})
 
     elif msg_type == "join_room":
@@ -126,7 +199,8 @@ async def handle_message(ws: WebSocket, conn: dict, data: dict) -> None:
         if len(room["players"]) >= 2:
             await send(ws, {"type": "error", "message": "Room is full"})
             return
-        room["players"]["B"] = {"ws": ws, "secret": None, "play_again": False}
+        player = new_player(ws)
+        room["players"]["B"] = player
         conn["room_code"] = code
         conn["role"] = "B"
         await send(
@@ -136,12 +210,36 @@ async def handle_message(ws: WebSocket, conn: dict, data: dict) -> None:
                 "room_code": code,
                 "digit_length": room["digit_length"],
                 "player_role": "B",
+                "token": player["token"],
             },
         )
         # Tell the waiting creator that an opponent has arrived.
         a = room["players"].get("A")
-        if a:
+        if a and a["ws"]:
             await send(a["ws"], {"type": "opponent_joined"})
+
+    elif msg_type == "rejoin":
+        code = (data.get("room_code") or "").strip().upper()
+        role = data.get("role")
+        token = data.get("token")
+        room = rooms.get(code)
+        if room is None or role not in room["players"]:
+            await send(ws, {"type": "rejoin_failed"})
+            return
+        player = room["players"][role]
+        if not token or token != player["token"]:
+            await send(ws, {"type": "rejoin_failed"})
+            return
+        # Re-attach this socket to the existing player slot.
+        player["ws"] = ws
+        player["connected"] = True
+        player["disconnected_at"] = None
+        conn["room_code"] = code
+        conn["role"] = role
+        await send(ws, build_state_sync(room, role))
+        opp = room["players"].get(opponent_role(role))
+        if opp and opp["ws"]:
+            await send(opp["ws"], {"type": "opponent_reconnected"})
 
     elif msg_type == "set_secret":
         room, role = current_room(conn)
@@ -201,6 +299,8 @@ async def handle_message(ws: WebSocket, conn: dict, data: dict) -> None:
         if full == room["digit_length"]:
             room["over"] = True
             room["turn"] = None
+            room["winner"] = role
+            room["winning_guess"] = guess
             await broadcast(
                 room,
                 {"type": "game_over", "winner": role, "winning_guess": guess},
@@ -233,6 +333,8 @@ async def handle_message(ws: WebSocket, conn: dict, data: dict) -> None:
             room["started"] = False
             room["over"] = False
             room["turn"] = None
+            room["winner"] = None
+            room["winning_guess"] = None
             for p in room["players"].values():
                 p["secret"] = None
                 p["play_again"] = False
@@ -255,20 +357,26 @@ async def handle_disconnect(conn: dict) -> None:
     room, role = current_room(conn)
     if room is None:
         return
-    # Remove this player and notify the opponent.
-    room["players"].pop(role, None)
+    player = room["players"].get(role)
+    if player is None:
+        return
+    # If a newer socket has already reconnected to this slot, this is a stale
+    # close event (common on mobile app-switching) — ignore it.
+    if player["ws"] is not conn.get("ws"):
+        return
+    # Mark offline but keep the slot so the player can rejoin with their token.
+    player["ws"] = None
+    player["connected"] = False
+    player["disconnected_at"] = time.time()
     opp = room["players"].get(opponent_role(role))
-    if opp:
+    if opp and opp["ws"]:
         await send(opp["ws"], {"type": "opponent_disconnected"})
-    # Garbage-collect empty rooms.
-    if not room["players"]:
-        rooms.pop(conn["room_code"], None)
 
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
-    conn: dict = {"room_code": None, "role": None}
+    conn: dict = {"room_code": None, "role": None, "ws": ws}
     try:
         while True:
             data = await ws.receive_json()

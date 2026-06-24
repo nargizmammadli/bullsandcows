@@ -7,10 +7,45 @@
     ws: null,
     roomCode: null,
     role: null,        // "A" or "B"
+    token: null,       // secret handle used to rejoin after a drop
     digitLength: 4,
+    turn: null,        // "A" | "B" | null — last known whose-turn
     myTurn: false,
     gameOver: false,
   };
+
+  // History filter: "both" or "mine".
+  let historyFilter = "both";
+
+  // ---- Session persistence (for reconnect) ------------------------------
+  const SESSION_KEY = "cb_session";
+  function saveSession() {
+    if (state.roomCode && state.role && state.token) {
+      try {
+        localStorage.setItem(
+          SESSION_KEY,
+          JSON.stringify({
+            roomCode: state.roomCode,
+            role: state.role,
+            token: state.token,
+            digitLength: state.digitLength,
+          })
+        );
+      } catch {}
+    }
+  }
+  function loadSession() {
+    try {
+      return JSON.parse(localStorage.getItem(SESSION_KEY));
+    } catch {
+      return null;
+    }
+  }
+  function clearSession() {
+    try {
+      localStorage.removeItem(SESSION_KEY);
+    } catch {}
+  }
 
   // ---- Element helpers --------------------------------------------------
   const $ = (id) => document.getElementById(id);
@@ -80,11 +115,17 @@
     return null;
   }
 
-  // ---- WebSocket --------------------------------------------------------
+  // ---- WebSocket + reconnection ----------------------------------------
+  let reconnectTimer = null;
+  let reconnectAttempts = 0;
+
   function connect() {
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(`${proto}://${location.host}/ws`);
     state.ws = ws;
+    ws.addEventListener("open", () => {
+      reconnectAttempts = 0;
+    });
     ws.addEventListener("message", (ev) => {
       let msg;
       try {
@@ -95,12 +136,61 @@
       handleMessage(msg);
     });
     ws.addEventListener("close", () => {
-      if (!state.gameOver) {
+      // Only this socket's close matters; if it's already been replaced, skip.
+      if (state.ws !== ws) return;
+      if (loadSession()) {
+        scheduleReconnect();
+      } else if (!state.gameOver) {
         showBanner("Connection lost. Refresh to start over.", "error");
       }
     });
     return ws;
   }
+
+  // Open a fresh socket and immediately ask to rejoin the saved room.
+  function doReconnect() {
+    const sess = loadSession();
+    if (!sess) return;
+    connect();
+    sendWhenReady({
+      type: "rejoin",
+      room_code: sess.roomCode,
+      role: sess.role,
+      token: sess.token,
+    });
+  }
+
+  // Backoff-based retry, driven by socket "close" events.
+  function scheduleReconnect() {
+    if (reconnectTimer) return;
+    showBanner("Connection lost — reconnecting…", "warn");
+    const delay = Math.min(800 * Math.pow(1.7, reconnectAttempts), 5000);
+    reconnectAttempts++;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      doReconnect();
+    }, delay);
+  }
+
+  // Immediate reconnect when the user returns to the tab / regains network.
+  function attemptReconnectNow() {
+    const sess = loadSession();
+    if (!sess) return;
+    const ws = state.ws;
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    reconnectAttempts = 0;
+    doReconnect();
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") attemptReconnectNow();
+  });
+  window.addEventListener("online", attemptReconnectNow);
+  window.addEventListener("focus", attemptReconnectNow);
 
   function sendWhenReady(message) {
     const ws = state.ws;
@@ -118,7 +208,9 @@
     switch (msg.type) {
       case "room_created":
         state.roomCode = msg.room_code;
-        state.role = "A";
+        state.role = msg.player_role || "A";
+        state.token = msg.token;
+        saveSession();
         $("lobby-roomcode").textContent = msg.room_code;
         $("lobby-status").textContent = "Waiting for an opponent to join…";
         showScreen("lobby");
@@ -131,8 +223,33 @@
       case "joined_room":
         state.roomCode = msg.room_code;
         state.role = msg.player_role;
+        state.token = msg.token;
         state.digitLength = msg.digit_length;
+        saveSession();
         goToSetSecret();
+        break;
+
+      case "state_sync":
+        // Reconnected — rebuild the UI to match the server's truth.
+        state.roomCode = msg.room_code;
+        state.role = msg.role;
+        state.digitLength = msg.digit_length;
+        saveSession();
+        hideBanner();
+        rebuildFromState(msg);
+        break;
+
+      case "rejoin_failed":
+        // Room is gone (server restarted, or abandoned too long).
+        clearSession();
+        hideBanner();
+        showBanner("Your previous game is no longer available.", "warn");
+        showScreen("home");
+        break;
+
+      case "opponent_reconnected":
+        hideBanner();
+        if (!screens.game.classList.contains("hidden")) setTurn(state.turn);
         break;
 
       case "opponent_joined":
@@ -204,6 +321,7 @@
   }
 
   function setTurn(turn) {
+    state.turn = turn;
     state.myTurn = turn === state.role;
     const banner = $("turn-banner");
     const card = $("guess-card");
@@ -245,6 +363,72 @@
     goToSetSecret();
   }
 
+  // Rebuild the whole UI from a server snapshot after a reconnect.
+  function rebuildFromState(s) {
+    state.gameOver = s.over;
+
+    // Lobby: room created but opponent never arrived.
+    if (!s.started && !s.over && !s.opponent_present) {
+      $("lobby-roomcode").textContent = state.roomCode;
+      $("lobby-status").textContent = "Waiting for an opponent to join…";
+      showScreen("lobby");
+      return;
+    }
+
+    // Secret-setting phase.
+    if (!s.started && !s.over) {
+      goToSetSecret();
+      if (s.you_secret_set) {
+        // Already locked in (we don't keep the secret client-side) — just wait.
+        state.secretBoxes.clear();
+        $("btn-set-secret").disabled = true;
+        $("secret-status").classList.remove("hidden");
+      }
+      if (!s.opponent_connected) {
+        showBanner("Opponent disconnected — waiting for them to return…", "warn");
+      }
+      return;
+    }
+
+    // Game in progress (or finished): build board + history, then maybe over.
+    state.guessBoxes = buildDigitBoxes($("guess-boxes"), state.digitLength, submitGuess);
+    renderHistory(s.history);
+
+    if (s.over) {
+      endGame(s.winner, s.winning_guess);
+    } else {
+      setTurn(s.turn);
+      showScreen("game");
+      if (!s.opponent_connected) {
+        showBanner("Your opponent disconnected.", "warn");
+        $("guess-card").classList.add("disabled");
+      }
+    }
+  }
+
+  // Render a full history array (oldest first; addHistoryRow puts newest on top).
+  function renderHistory(historyArr) {
+    $("history").innerHTML = "";
+    if (!historyArr || historyArr.length === 0) {
+      renderHistoryEmpty($("history"));
+      return;
+    }
+    historyArr.forEach((h) => addHistoryRow(h.player, h.guess, h.full, h.half));
+  }
+
+  // Toggle between showing only your guesses and both players' guesses.
+  function applyHistoryFilter(f) {
+    historyFilter = f;
+    ["history", "history-over"].forEach((id) => {
+      const c = $(id);
+      if (!c) return;
+      c.classList.toggle("filter-mine", f === "mine");
+    });
+    document.querySelectorAll(".history-filter button").forEach((b) => {
+      b.classList.toggle("active", b.dataset.filter === f);
+    });
+  }
+
   // ---- History rendering ------------------------------------------------
   function renderHistoryEmpty(container) {
     container.innerHTML =
@@ -256,11 +440,12 @@
     const empty = container.querySelector(".history-empty");
     if (empty) empty.remove();
 
+    const isYou = player === state.role;
+
     const row = document.createElement("div");
-    row.className = "history-row";
+    row.className = "history-row " + (isYou ? "mine" : "theirs");
 
     const who = document.createElement("span");
-    const isYou = player === state.role;
     who.className = "history-who" + (isYou ? " you" : "");
     who.textContent = isYou ? "You" : "Opponent";
     row.appendChild(who);
@@ -378,10 +563,27 @@
     sendWhenReady({ type: "play_again" });
   });
 
-  // ---- Deep-link support: ?room=CODE prefills join ----------------------
+  // History filter buttons (event delegation — works for both screens).
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest(".history-filter button");
+    if (btn) applyHistoryFilter(btn.dataset.filter);
+  });
+  applyHistoryFilter("both");
+
+  // ---- Startup ----------------------------------------------------------
+  // A ?room=CODE link is meant for a *joining* friend — prefer the join flow
+  // (and drop any stale session from a previous game on this device).
   const params = new URLSearchParams(location.search);
   const preRoom = params.get("room");
   if (preRoom) {
+    clearSession();
     $("join-code").value = preRoom.toUpperCase();
+    showScreen("home");
+  } else if (loadSession()) {
+    // Returning to an in-progress game (e.g. after a refresh) — try to rejoin.
+    showBanner("Reconnecting to your game…", "warn");
+    doReconnect();
+  } else {
+    showScreen("home");
   }
 })();

@@ -83,7 +83,13 @@
         <button id="btn-guess" class="primary">Submit Guess</button>
       </div>
 
-      <h3 class="history-title">History</h3>
+      <div class="history-header">
+        <h3 class="history-title">History</h3>
+        <div class="history-filter" role="group" aria-label="Filter history">
+          <button type="button" data-filter="both">Both</button>
+          <button type="button" data-filter="mine">Mine</button>
+        </div>
+      </div>
       <div id="history" class="history"></div>
     </section>
 
@@ -97,7 +103,13 @@
           Waiting for opponent to accept…
         </p>
       </div>
-      <h3 class="history-title">Final History</h3>
+      <div class="history-header">
+        <h3 class="history-title">Final History</h3>
+        <div class="history-filter" role="group" aria-label="Filter history">
+          <button type="button" data-filter="both">Both</button>
+          <button type="button" data-filter="mine">Mine</button>
+        </div>
+      </div>
       <div id="history-over" class="history"></div>
     </section>
   </div>

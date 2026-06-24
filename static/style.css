@@ -177,7 +177,37 @@ button.ghost:hover { background: var(--border); }
 .guess-label { text-align: center; }
 
 /* History */
-.history-title { margin: 20px 0 10px; }
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 20px 0 10px;
+  gap: 12px;
+}
+.history-title { margin: 0; }
+.history-filter {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.history-filter button {
+  width: auto;
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 0;
+  background: var(--card-2);
+  color: var(--muted);
+}
+.history-filter button + button { border-left: 1px solid var(--border); }
+.history-filter button.active { background: var(--accent); color: #fff; }
+.history-filter button:not(.active):hover { background: var(--border); color: var(--text); }
+
+/* "Mine" filter hides the opponent's rows. */
+.history.filter-mine .history-row.theirs { display: none; }
+
 .history {
   display: flex;
   flex-direction: column;
