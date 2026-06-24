@@ -60,6 +60,8 @@
   function showScreen(name) {
     Object.values(screens).forEach((s) => s.classList.add("hidden"));
     screens[name].classList.remove("hidden");
+    // The "New Game" button is available everywhere except the home screen.
+    $("btn-home").classList.toggle("hidden", name === "home");
   }
 
   function showBanner(text, kind) {
@@ -118,8 +120,10 @@
   // ---- WebSocket + reconnection ----------------------------------------
   let reconnectTimer = null;
   let reconnectAttempts = 0;
+  let intentionalClose = false; // set when the user deliberately leaves a game
 
   function connect() {
+    intentionalClose = false;
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(`${proto}://${location.host}/ws`);
     state.ws = ws;
@@ -138,6 +142,7 @@
     ws.addEventListener("close", () => {
       // Only this socket's close matters; if it's already been replaced, skip.
       if (state.ws !== ws) return;
+      if (intentionalClose) return; // user left the game on purpose
       if (loadSession()) {
         scheduleReconnect();
       } else if (!state.gameOver) {
@@ -363,6 +368,37 @@
     goToSetSecret();
   }
 
+  // Leave the current game and return Home to start fresh (e.g. a new room
+  // with a different digit count). The digit count is fixed per room, so a new
+  // game means a new room.
+  function goHome() {
+    const inProgress = !screens.game.classList.contains("hidden") && !state.gameOver;
+    if (inProgress && !confirm("Leave this game and start a new one?")) return;
+
+    clearSession();
+    intentionalClose = true;
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    if (state.ws) {
+      try { state.ws.close(); } catch {}
+    }
+    state.ws = null;
+    state.roomCode = null;
+    state.role = null;
+    state.token = null;
+    state.turn = null;
+    state.myTurn = false;
+    state.gameOver = false;
+    state.secretBoxes = null;
+    state.guessBoxes = null;
+
+    hideBanner();
+    $("history").innerHTML = "";
+    $("history-over").innerHTML = "";
+    $("join-code").value = "";
+    showScreen("home");
+  }
+
   // Rebuild the whole UI from a server snapshot after a reconnect.
   function rebuildFromState(s) {
     state.gameOver = s.over;
@@ -556,6 +592,7 @@
 
   $("btn-set-secret").addEventListener("click", submitSecret);
   $("btn-guess").addEventListener("click", submitGuess);
+  $("btn-home").addEventListener("click", goHome);
 
   $("btn-play-again").addEventListener("click", () => {
     $("btn-play-again").disabled = true;
