@@ -180,6 +180,7 @@
     $("my-secret-row").classList.add("hidden"); // no player secret to show
     // Only one player guesses here, so the Mine/Both filter is meaningless.
     document.querySelector("#screen-game .history-filter").classList.add("hidden");
+    $("btn-give-up").classList.remove("hidden"); // can give up anytime
     setTurn("A");
     showScreen("game");
   }
@@ -345,7 +346,7 @@
         setTurn(msg.next_turn);
         break;
 
-      case "game_over":
+      case "game_over": {
         // A winning guess is an exact match: full == length, half == 0.
         addHistoryRow(
           msg.winner,
@@ -353,8 +354,11 @@
           msg.winning_guess.length,
           0
         );
-        endGame(msg.winner, msg.winning_guess);
+        const oppRole = state.role === "A" ? "B" : "A";
+        const revealed = msg.secrets ? msg.secrets[oppRole] : null;
+        endGame(msg.winner, msg.winning_guess, revealed);
         break;
+      }
 
       case "room_reset":
         if (msg.digit_length) state.digitLength = msg.digit_length;
@@ -409,6 +413,7 @@
     secretRevealed = false;
     renderMySecret();
     document.querySelector("#screen-game .history-filter").classList.remove("hidden");
+    $("btn-give-up").classList.add("hidden"); // no giving up in a friend match
     setTurn(firstTurn);
     showScreen("game");
   }
@@ -440,15 +445,20 @@
     }
   }
 
-  function endGame(winner, winningGuess) {
+  // Low-level: populate and show the game-over screen.
+  function showOverScreen(headlineText, headlineClass, detailText, revealedSecret) {
     state.gameOver = true;
-    const won = winner === state.role;
     const headline = $("over-headline");
-    headline.textContent = won ? "🎉 You Win!" : "You Lose";
-    headline.className = won ? "win" : "lose";
-    $("over-detail").textContent = won
-      ? `You cracked the secret: ${winningGuess}`
-      : `${state.opponentLabel} guessed your secret: ${winningGuess}`;
+    headline.textContent = headlineText;
+    headline.className = headlineClass;
+    $("over-detail").textContent = detailText;
+    const sec = $("over-secret");
+    if (revealedSecret) {
+      sec.textContent = `The secret was: ${revealedSecret}`;
+      sec.classList.remove("hidden");
+    } else {
+      sec.classList.add("hidden");
+    }
     // Copy the live history into the game-over screen.
     $("history-over").innerHTML = $("history").innerHTML;
     $("btn-play-again").disabled = false;
@@ -456,6 +466,26 @@
     // Default the next-round length selector to the current length.
     $("replay-length").value = String(state.digitLength);
     showScreen("over");
+  }
+
+  // `revealedSecret` (optional) is shown to the loser — the secret they were
+  // trying to crack.
+  function endGame(winner, winningGuess, revealedSecret) {
+    const won = winner === state.role;
+    showOverScreen(
+      won ? "🎉 You Win!" : "You Lose",
+      won ? "win" : "lose",
+      won
+        ? `You cracked the secret: ${winningGuess}`
+        : `${state.opponentLabel} guessed your secret: ${winningGuess}`,
+      won ? null : revealedSecret || null
+    );
+  }
+
+  // Computer mode: reveal the secret and end the round.
+  function giveUpVsComputer() {
+    if (state.mode !== "computer" || state.gameOver) return;
+    showOverScreen("Secret revealed", "lose", "You gave up this round.", state.cpuSecret);
   }
 
   function resetForReplay() {
@@ -545,7 +575,9 @@
     renderMySecret();
 
     if (s.over) {
-      endGame(s.winner, s.winning_guess);
+      const oppRole = state.role === "A" ? "B" : "A";
+      const revealed = s.secrets ? s.secrets[oppRole] : null;
+      endGame(s.winner, s.winning_guess, revealed);
     } else {
       setTurn(s.turn);
       showScreen("game");
@@ -762,6 +794,9 @@
   $("btn-toggle-secret").addEventListener("click", () => {
     secretRevealed = !secretRevealed;
     renderMySecret();
+  });
+  $("btn-give-up").addEventListener("click", () => {
+    if (confirm("Give up and reveal the secret?")) giveUpVsComputer();
   });
 
   $("btn-play-again").addEventListener("click", () => {

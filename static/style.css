@@ -124,6 +124,15 @@ button.ghost:hover { background: var(--border); }
 .mode-btn { padding: 20px 16px; font-size: 1.15rem; }
 .back-btn { width: auto; margin-top: 4px; }
 .suggest-btn { width: auto; display: block; margin: 0 auto 14px; }
+.give-up-btn { width: auto; display: block; margin: 0 auto 8px; }
+
+/* Revealed secret on the game-over screen */
+.reveal-secret {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 6px 0 16px;
+  color: var(--text);
+}
 
 .muted { color: var(--muted); font-size: 0.92rem; line-height: 1.5; }
 .status { color: var(--accent); margin-top: 14px; font-weight: 500; }

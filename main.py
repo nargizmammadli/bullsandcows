@@ -146,7 +146,7 @@ def build_state_sync(room: dict, role: str) -> dict:
     """
     me = room["players"][role]
     opp = room["players"].get(opponent_role(role))
-    return {
+    snapshot = {
         "type": "state_sync",
         "room_code": room["code"],
         "role": role,
@@ -162,6 +162,11 @@ def build_state_sync(room: dict, role: str) -> dict:
         "winner": room["winner"],
         "winning_guess": room["winning_guess"],
     }
+    # Once the game is over, include both secrets so a reconnecting loser can
+    # still see the secret they were trying to crack.
+    if room["over"]:
+        snapshot["secrets"] = {r: p["secret"] for r, p in room["players"].items()}
+    return snapshot
 
 
 async def handle_message(ws: WebSocket, conn: dict, data: dict) -> None:
@@ -301,9 +306,17 @@ async def handle_message(ws: WebSocket, conn: dict, data: dict) -> None:
             room["turn"] = None
             room["winner"] = role
             room["winning_guess"] = guess
+            # Reveal both secrets at game end so the loser sees what they were
+            # chasing. (The winner's guess already exposed the other secret.)
+            secrets = {r: p["secret"] for r, p in room["players"].items()}
             await broadcast(
                 room,
-                {"type": "game_over", "winner": role, "winning_guess": guess},
+                {
+                    "type": "game_over",
+                    "winner": role,
+                    "winning_guess": guess,
+                    "secrets": secrets,
+                },
             )
         else:
             room["turn"] = opp

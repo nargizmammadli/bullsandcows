@@ -120,6 +120,8 @@
         <button id="btn-guess" class="primary">Submit Guess</button>
       </div>
 
+      <button id="btn-give-up" class="ghost give-up-btn hidden" type="button">🏳️ Give up & show secret</button>
+
       <div class="history-header">
         <h3 class="history-title">History</h3>
         <div class="history-filter" role="group" aria-label="Filter history">
@@ -135,6 +137,7 @@
       <div class="card center">
         <h2 id="over-headline">Game Over</h2>
         <p id="over-detail" class="muted"></p>
+        <p id="over-secret" class="reveal-secret hidden"></p>
         <label for="replay-length">Digits for next round</label>
         <select id="replay-length">
           <option value="3">3 digits</option>
